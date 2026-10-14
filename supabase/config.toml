@@ -1,0 +1,74 @@
+# Supabase CLI configuration for LOCAL development (`npx supabase start`).
+# Hosted projects are configured in the dashboard — see README "Supabase setup".
+project_id = "joyno-content-studio"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+# Wildcard is required so redirect links may carry query parameters
+# (e.g. /accept-invite?token=...).
+additional_redirect_urls = ["http://localhost:5173/**", "http://127.0.0.1:5173/**"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+# Public self-registration is disabled. Accounts are created only by the
+# bootstrap function or by administrator invitations.
+enable_signup = false
+minimum_password_length = 12
+password_requirements = "lower_upper_letters_digits"
+
+[auth.rate_limit]
+email_sent = 30
+token_verifications = 30
+sign_in_sign_ups = 30
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+max_frequency = "1m0s"
+otp_length = 6
+otp_expiry = 3600
+
+[auth.email.template.invite]
+subject = "You're invited to Joyno Media Content Studio"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Joyno Media Content Studio password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.magic_link]
+subject = "Your Joyno Media Content Studio sign-in link"
+content_path = "./supabase/templates/magic_link.html"
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+
+[functions.bootstrap]
+# The installer has no account yet; the function checks BOOTSTRAP_TOKEN.
+verify_jwt = false
+
+[functions.invite-member]
+verify_jwt = true
