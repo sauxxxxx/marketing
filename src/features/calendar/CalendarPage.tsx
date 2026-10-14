@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Download, PanelRightClose, PanelRightOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -26,25 +26,30 @@ import {
   shiftMonth,
   toLocalDate,
 } from '@/lib/dates'
-import type { CalendarView, ContentItem, KeyDate } from '@/types/database'
+import type { ContentItem, KeyDate } from '@/types/database'
 import { ExportDialog } from '@/features/export/ExportDialog'
 import { AgendaView, CalendarDnd, MonthView, PeriodView } from './CalendarViews'
+import { CalendarDayDrawer } from './CalendarDayDrawer'
+import type { DisplayCalendarView } from './calendarTypes'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-const VIEWS: CalendarView[] = ['month', 'week', 'two_week']
+const VIEWS: DisplayCalendarView[] = ['month', 'week', 'two_week', 'agenda']
 
 export default function CalendarPage() {
   const { workspace, role, userId, today } = useActiveWorkspace()
   const lookups = useLookups()
-  const { openContent, createContent } = useContentPanel()
+  const { openContent, createContent, isOpen: editorOpen } = useContentPanel()
   const [params, setParams] = useSearchParams()
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const isWide = useMediaQuery('(min-width: 1280px)')
   const [summaryOpen, setSummaryOpen] = useState(true)
   const [exportOpen, setExportOpen] = useState(false)
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
+  const dayTrigger = useRef<HTMLElement | null>(null)
 
-  const view: CalendarView = VIEWS.includes(params.get('view') as CalendarView) ? (params.get('view') as CalendarView) : workspace.default_calendar_view
+  const view: DisplayCalendarView = VIEWS.includes(params.get('view') as DisplayCalendarView) ? (params.get('view') as DisplayCalendarView) : workspace.default_calendar_view
+  const isMonthPeriod = view === 'month' || view === 'agenda'
   const anchor = ISO_DATE.test(params.get('d') ?? '') ? params.get('d')! : today
   const filters = useMemo(() => filtersFromParams(params), [params])
   const anchorDate = toLocalDate(anchor)
@@ -52,10 +57,12 @@ export default function CalendarPage() {
   const month = anchorDate.getMonth() + 1
 
   const days = useMemo(
-    () => (view === 'month' ? monthGridDays(year, month) : periodDays(anchor, view === 'week' ? 7 : 14)),
+    () => view === 'agenda'
+      ? monthGridDays(year, month).filter((date) => date.startsWith(toMonthKey(year, month)))
+      : view === 'month' ? monthGridDays(year, month) : periodDays(anchor, view === 'week' ? 7 : 14),
     [view, year, month, anchor],
   )
-  const period = view === 'month' ? monthRange(year, month) : { from: days[0], to: days[days.length - 1] }
+  const period = isMonthPeriod ? monthRange(year, month) : { from: days[0], to: days[days.length - 1] }
   const content = useContentRange(days[0], days[days.length - 1])
   const keyDates = useKeyDates(days[0], days[days.length - 1])
   const unscheduled = useUnscheduledContent()
@@ -74,7 +81,8 @@ export default function CalendarPage() {
   const setFilters = (f: ContentFilters) => setParams(filtersToParams(f, params), { replace: true })
 
   const move = (delta: -1 | 1) => {
-    if (view === 'month') {
+    setSelectedDay(null)
+    if (isMonthPeriod) {
       const next = shiftMonth(year, month, delta)
       update({ d: `${toMonthKey(next.year, next.month)}-01` })
     } else {
@@ -132,10 +140,10 @@ export default function CalendarPage() {
   const canCreate = can(role, 'content.create')
   const singleBrand = filters.brandIds.length === 1 ? filters.brandIds[0] : undefined
   const heading =
-    view === 'month'
+    isMonthPeriod
       ? formatMonth(year, month)
       : `${formatDate(days[0], 'd MMM')} – ${formatDate(days[days.length - 1], 'd MMM yyyy')}`
-  const periodLabel = view === 'month' ? formatMonth(year, month) : heading
+  const periodLabel = isMonthPeriod ? formatMonth(year, month) : heading
 
   const viewProps = {
     days,
@@ -151,6 +159,10 @@ export default function CalendarPage() {
     onOpen: (item: ContentItem) => openContent(item.id),
     onCreate: (date: string) => createContent({ scheduled_date: date, brand_id: singleBrand }),
     onMove,
+    onSelectDay: (date: string) => {
+      dayTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      setSelectedDay(date)
+    },
   }
 
   return (
@@ -161,7 +173,7 @@ export default function CalendarPage() {
             <Button variant="outline" size="icon-sm" aria-label="Previous period" onClick={() => move(-1)}>
               <ChevronLeft />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => update({ d: today })}>
+            <Button variant="outline" size="sm" onClick={() => { setSelectedDay(null); update({ d: today }) }}>
               Today
             </Button>
             <Button variant="outline" size="icon-sm" aria-label="Next period" onClick={() => move(1)}>
@@ -173,11 +185,12 @@ export default function CalendarPage() {
           </h1>
           <div className="ml-auto flex items-center gap-2">
             {isDesktop && (
-              <Tabs value={view} onValueChange={(v) => update({ view: v })}>
+              <Tabs value={view} onValueChange={(v) => { setSelectedDay(null); update({ view: v }) }}>
                 <TabsList>
                   <TabsTrigger value="month">Month</TabsTrigger>
                   <TabsTrigger value="week">Week</TabsTrigger>
                   <TabsTrigger value="two_week">2 weeks</TabsTrigger>
+                  <TabsTrigger value="agenda">Agenda</TabsTrigger>
                 </TabsList>
               </Tabs>
             )}
@@ -201,7 +214,7 @@ export default function CalendarPage() {
       ) : (
         <div className="flex min-h-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col overflow-auto">
-            {!isDesktop ? (
+            {!isDesktop || view === 'agenda' ? (
               <AgendaView {...viewProps} />
             ) : (
               <CalendarDnd onMove={onMove} renderOverlay={(item) => <CompactContentCard item={item} lookups={lookups} today={today} />}>
@@ -238,6 +251,19 @@ export default function CalendarPage() {
       )}
 
       <ExportDialog open={exportOpen} onOpenChange={setExportOpen} year={year} month={month} brandIds={filters.brandIds} />
+      <CalendarDayDrawer
+        date={selectedDay}
+        items={selectedDay ? itemsByDay.get(selectedDay) ?? [] : []}
+        keyDates={selectedDay ? keyDatesByDay.get(selectedDay) ?? [] : []}
+        lookups={lookups}
+        today={today}
+        canCreate={canCreate}
+        editorOpen={editorOpen}
+        returnFocus={dayTrigger.current}
+        onClose={() => setSelectedDay(null)}
+        onOpen={viewProps.onOpen}
+        onCreate={viewProps.onCreate}
+      />
     </div>
   )
 }

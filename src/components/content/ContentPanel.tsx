@@ -10,6 +10,7 @@ export type ContentDefaults = Partial<Omit<ContentInsert, 'workspace_id'>>
 type PanelState = { mode: 'edit'; id: string } | { mode: 'create'; defaults: ContentDefaults } | null
 
 interface ContentPanelValue {
+  isOpen: boolean
   openContent: (id: string) => void
   createContent: (defaults?: ContentDefaults) => void
 }
@@ -46,10 +47,11 @@ export function ContentPanelProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ContentPanelValue>(
     () => ({
+      isOpen: state !== null,
       openContent: (id) => guard(() => setState({ mode: 'edit', id })),
       createContent: (defaults = {}) => guard(() => setState({ mode: 'create', defaults })),
     }),
-    [guard],
+    [guard, state],
   )
 
   const close = () => {

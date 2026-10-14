@@ -26,7 +26,7 @@ vi.mock('@/features/workspace/WorkspaceProvider', () => ({
 }))
 
 import { usePatchContentOptimistic, contentKey } from '@/hooks/useContent'
-import { CalendarDnd, MonthView, PeriodView, type CalendarViewProps } from '@/features/calendar/CalendarViews'
+import { AgendaView, CalendarDnd, MonthView, PeriodView, type CalendarViewProps } from '@/features/calendar/CalendarViews'
 import type { Lookups } from '@/hooks/useWorkspaceData'
 import { monthGridDays, periodDays } from '@/lib/dates'
 import type { ContentItem } from '@/types/database'
@@ -107,6 +107,7 @@ function viewProps(days: string[], items: ContentItem[]): CalendarViewProps {
     onOpen: vi.fn(),
     onCreate: vi.fn(),
     onMove: vi.fn(),
+    onSelectDay: vi.fn(),
   }
 }
 
@@ -148,5 +149,42 @@ describe('calendar views', () => {
     expect(props.onOpen).toHaveBeenCalledWith(items[0])
     screen.getByRole('button', { name: 'Add content on 20 November' }).click()
     expect(props.onCreate).toHaveBeenCalledWith('2026-11-20')
+  })
+
+  it('limits a busy day to two previews and opens the full day without losing records', async () => {
+    const busyItems = Array.from({ length: 12 }, (_, index) => makeItem({ title: `Busy post ${index + 1}`, scheduled_date: '2026-11-09' }))
+    const props = viewProps(monthGridDays(2026, 11), busyItems)
+    render(<CalendarDnd onMove={vi.fn()} renderOverlay={() => null}><MonthView {...props} /></CalendarDnd>)
+    const cell = dayCellOf('Busy post 1')
+    expect(within(cell).getAllByRole('button', { name: /Press Enter to open/ })).toHaveLength(2)
+    expect(within(cell).getByText('12 posts')).toBeInTheDocument()
+    expect(within(cell).getByText('+10 more')).toBeInTheDocument()
+    expect(screen.queryByText('Busy post 12')).not.toBeInTheDocument()
+    await (await import('@testing-library/user-event')).default.click(within(cell).getByRole('button', { name: 'Show all 12 posts on 9 November' }))
+    expect(props.onSelectDay).toHaveBeenCalledWith('2026-11-09')
+    await (await import('@testing-library/user-event')).default.click(within(cell).getByLabelText('Monday, 9 November 2026'))
+    expect(props.onSelectDay).toHaveBeenCalledTimes(2)
+    expect(props.onCreate).not.toHaveBeenCalled()
+  })
+
+  it('keeps day viewing available for viewers without offering content creation or dragging', async () => {
+    const props = { ...viewProps(monthGridDays(2026, 11), items), canCreate: false, canDrag: () => false }
+    render(<CalendarDnd onMove={vi.fn()} renderOverlay={() => null}><MonthView {...props} /></CalendarDnd>)
+    expect(screen.queryByRole('button', { name: /Add content on/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Kickoff carousel/ })).toHaveAccessibleName(/Press Enter to open\.$/)
+    await (await import('@testing-library/user-event')).default.click(screen.getByLabelText('Monday, 9 November 2026'))
+    expect(props.onSelectDay).toHaveBeenCalledWith('2026-11-09')
+  })
+
+  it('shows every supplied post in the agenda and opens records using keyboard activation', async () => {
+    const props = viewProps(periodDays('2026-11-09', 7), items)
+    render(<AgendaView {...props} />)
+    const open = screen.getByRole('button', { name: 'Open Weekend reel' })
+    open.focus()
+    await (await import('@testing-library/user-event')).default.keyboard(' ')
+    expect(props.onOpen).toHaveBeenCalledWith(items[1])
+    await (await import('@testing-library/user-event')).default.click(screen.getByRole('checkbox', { name: 'Group by brand' }))
+    expect(screen.getAllByRole('button', { name: /^Open / })).toHaveLength(2)
+    expect(screen.getAllByRole('heading', { level: 4 })).toHaveLength(2)
   })
 })
